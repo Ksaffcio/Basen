@@ -2,11 +2,13 @@
 #define BASEN_H
 
 /*
-  Główny plik nagłówkowy: zawiera:
-  - standardowe includy,
-  - definicje stałych i makr,
-  - definicje struktur danych (SharedData, ClientInfo),
-  - deklaracje funkcji log_event(), validate_parameters().
+  GŁÓWNY PLIK NAGŁÓWKOWY PROJEKTU
+  --------------------------------
+  Zawiera:
+  - standardowe include'y
+  - definicje stałych (np. liczbę basenów, rozmiar kolejki)
+  - deklaracje struktur kluczowych (SharedData, ClientInfo)
+  - prototypy funkcji pomocniczych (log_event, validate_parameters)
 */
 
 #include <stdio.h>
@@ -23,75 +25,82 @@
 #include <fcntl.h>
 #include <time.h>
 #include <pthread.h>
-#include <sys/wait.h> // <- dla wait()
+#include <sys/wait.h>
 
-// ----- Stałe ----- //
-
-// Maksymalny rozmiar kolejki
-#define MAX_QUEUE_SIZE 50
-// Maksymalna liczba klientów
-#define MAX_CLIENTS 100
-// Prawdopodobieństwo (w %) bycia VIP
-#define VIP_PROB 20
-
-// Identyfikatory basenów
+// Identyfikatory trzech basenów
 #define OLYMPIC_POOL      0
 #define RECREATIONAL_POOL 1
 #define KIDDIE_POOL       2
 #define POOLS_COUNT       3
 
-// Specjalne sygnały (ratownik -> klient)
+// Limity
+#define MAX_QUEUE_SIZE 50   // maks. liczba osób w kolejce
+#define MAX_CLIENTS 100     // maks. liczba "procesów klientów" w systemie
+#define VIP_PROB 20         // prawdopodobieństwo (%) bycia VIP
+
+// Sygnały użytkownika (ratownik -> klient)
 #define SIG_EMPTY_POOL  SIGUSR1
 #define SIG_REOPEN_POOL SIGUSR2
 
-// ----- Struktury ----- //
-
-// Struktura przechowująca info o kliencie
+/*
+  Struktura opisująca pojedynczego klienta.
+  Jeśli jest to dziecko <10 lat, pole hasGuardian=1 oznacza
+  "dziecko i opiekun" w jednym procesie.
+*/
 typedef struct {
-    int  pid;             // PID procesu (0 oznacza, że slot wolny)
+    int  pid;             // PID procesu klienta (0 => slot wolny)
     int  age;             // wiek
-    int  isVIP;           // 0 - zwykły, 1 - VIP
-    int  ticketTime;      // czas ważności biletu (sekundy)
-    int  currentPool;     // aktualny basen (-1 jeśli nie w basenie)
+    int  isVIP;           // flaga VIP
+    int  ticketTime;      // czas ważności biletu (sekundy); -1 => "nieskończony"
+    int  currentPool;     // basen, w którym obecnie przebywa (-1 => nie w basenie)
     time_t enterTime;     // czas wejścia do basenu
-    int  hasGuardian;     // 1 - to dziecko <10 lat z opiekunem w jednym procesie
-    int  mustHavePampers; // 1 - jeśli wiek <3
-    int  isTicketFree;    // 1 - jeśli nie płaci (wiek<10)
+    int  isTicketFree;    // 1 => bilet darmowy (dzieci <10 lat)
+    int  hasGuardian;     // 1 => to jest dziecko z opiekunem
+    int  mustHavePampers; // 1 => wiek <3 => musi mieć pampers
 } ClientInfo;
 
-// Struktura pamięci dzielonej
+/*
+  Struktura pamięci dzielonej, w której przechowujemy wspólny stan.
+*/
 typedef struct {
     // Parametry z wejścia
     int openTime;              // Tp
-    int closeTime;             // Tk (jeśli == -1 -> symulacja nieskończona)
-    int capacity[POOLS_COUNT]; // X1, X2, X3 (max. osób na basen)
+    int closeTime;             // Tk  (=-1 => symulacja nieskończona)
+    int capacity[POOLS_COUNT]; // X1, X2, X3 => limity basenów
 
-    // Kolejka oczekujących (PID-y)
+    // Kolejka klientów (przechowujemy PIDy)
     int queue[MAX_QUEUE_SIZE];
     int queueCount;
 
-    // Tablica klientów
+    // Tablica klientów (maks. MAX_CLIENTS)
     ClientInfo clients[MAX_CLIENTS];
 
-    // Stan basenów
-    int currentInPool[POOLS_COUNT]; // ile osób aktualnie
-    int sumAgesInPool[POOLS_COUNT]; // sumaryczny wiek (do liczenia średniej)
+    // Stan każdego basenu: ilu obecnie pływa, sumaryczny wiek (do średniej)
+    int currentInPool[POOLS_COUNT];
+    int sumAgesInPool[POOLS_COUNT];
 
-    // Flagi otwarcia
-    int poolOpen[POOLS_COUNT]; // 1 - otwarty, 0 - zamknięty
-    int facilityOpen;          // 1 - obiekt otwarty, 0 - zamknięty
+    // Flagi otwarcia basenów
+    int poolOpen[POOLS_COUNT]; // 1 => otwarty, 0 => zamknięty
+    int facilityOpen;          // 1 => obiekt otwarty, 0 => zamknięty
 } SharedData;
 
-// Plik do ftok() i klucz
+// Plik używany do ftok()
 #define IPC_KEY_FILE "ipc_key_file"
 #define IPC_KEY_ID   0x1234
 
-// ----- Funkcje pomocnicze ----- //
+// Deklaracje funkcji pomocniczych:
 
-// Zapis zdarzeń do pliku log
+/*
+  log_event:
+    - Zapisuje komunikat (msg) do pliku basen.log, dopisując nową linię.
+*/
 void log_event(const char *msg);
 
-// Walidacja parametrów (Tp, Tk, X1..X3)
+/*
+  validate_parameters:
+    - Sprawdza poprawność parametrów (Tp, Tk, X1, X2, X3).
+    - Zwraca 1 => poprawne, 0 => niepoprawne.
+*/
 int validate_parameters(int Tp, int Tk, int X1, int X2, int X3);
 
 #endif
